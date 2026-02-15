@@ -13,8 +13,8 @@ export default defineConfig({
     viteStaticCopy({
       targets: [
         {
-          src: 'node_modules/@pdftron/webviewer/public/*',
-          dest: 'lib/webviewer',
+          src: 'node_modules/@pdftron/webviewer/public/**/*',
+          dest: 'webviewer-lib',
         },
       ],
     }),

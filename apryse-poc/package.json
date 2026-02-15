@@ -4,9 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "copy-webviewer": "node -e \"require('fs').cpSync('node_modules/@pdftron/webviewer/public', 'public/lib/webviewer', {recursive: true})\"",
-    "dev": "npm run copy-webviewer && vite",
-    "build": "npm run copy-webviewer && vite build",
+    "dev": "vite",
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },

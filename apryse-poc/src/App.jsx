@@ -4,6 +4,50 @@ import WebViewer from '@pdftron/webviewer';
 import './App.css';
 
 const STORAGE_KEY_PREFIX = 'webviewer_annotations_';
+const SUPPORTED_EXTENSIONS = new Set(['pdf', 'docx', 'xlsx', 'xls', 'pptx', 'ppt']);
+const SUPPORTED_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-powerpoint',
+]);
+const MIME_TO_EXTENSION = {
+  'application/pdf': 'pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'application/vnd.ms-powerpoint': 'ppt',
+};
+const WEBVIEWER_PATH = '/webviewer-lib';
+
+const safeSetLocalStorage = (key, value) => {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    // If quota is exceeded, clear only viewer keys and retry once.
+    if (error?.name === 'QuotaExceededError' || error?.code === 22) {
+      Object.keys(localStorage)
+        .filter((itemKey) => itemKey.startsWith(STORAGE_KEY_PREFIX))
+        .forEach((itemKey) => localStorage.removeItem(itemKey));
+      try {
+        localStorage.setItem(key, value);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+};
+
+const getFileExtension = (filename = '') => {
+  const parts = filename.toLowerCase().split('.');
+  return parts.length > 1 ? parts.pop() : '';
+};
 const isValidXfdf = (value) => {
   if (!value || typeof value !== 'string') return false;
   const trimmed = value.trim();
@@ -28,9 +72,9 @@ function App() {
 
     WebViewer(
       {
-        path: '/lib/webviewer',
+        path: WEBVIEWER_PATH,
         licenseKey:
-          '1771159100768:609e95810300000000716850aaa6765e61788301c95176a2e1ff98cbd6',
+          'demo:1771159100768:609e95810300000000716850aaa6765e61788301c95176a2e1ff98cbd6',
         initialDoc: 'https://pdftron.s3.amazonaws.com/downloads/pl/demo-annotated.pdf',
         fullAPI: true,
         isReadOnly: false,
@@ -70,7 +114,7 @@ function App() {
             widgets: false,
           });
           const storageKey = `${STORAGE_KEY_PREFIX}${filename}`;
-          localStorage.setItem(storageKey, xfdfString);
+          safeSetLocalStorage(storageKey, xfdfString);
         }
       );
 
@@ -85,19 +129,22 @@ function App() {
   const buildDocId = (file) =>
     `${file.name}__${file.size}_${file.lastModified}`.replace(/\s+/g, '_');
 
-  const loadLocalPdf = async (e) => {
+  const loadLocalDocument = async (e) => {
     const file = e.target.files?.[0];
     if (!file) {
       return;
     }
 
-    const isPdfByType = (file.type || '').toLowerCase() === 'application/pdf';
-    const isPdfByName = file.name?.toLowerCase().endsWith('.pdf');
-    if (!isPdfByType && !isPdfByName) {
-      alert('Please select a valid PDF file.');
+    const extension = getFileExtension(file.name);
+    const fileType = (file.type || '').toLowerCase();
+    const isSupportedByExt = SUPPORTED_EXTENSIONS.has(extension);
+    const isSupportedByType = SUPPORTED_MIME_TYPES.has(fileType);
+    if (!isSupportedByExt && !isSupportedByType) {
+      alert('Please select a valid PDF, DOCX, XLSX/XLS, or PPTX/PPT file.');
       e.target.value = '';
       return;
     }
+    const resolvedExtension = extension || MIME_TO_EXTENSION[fileType];
 
     const instance = instanceRef.current;
     if (!instance) {
@@ -110,10 +157,9 @@ function App() {
     const docId = buildDocId(file);
     try {
       instance.Core.documentViewer.closeDocument();
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      await instance.UI.loadDocument(bytes, {
-        filename: docId,
-        extension: 'pdf',
+      await instance.UI.loadDocument(file, {
+        filename: `${docId}.${resolvedExtension}`,
+        extension: resolvedExtension,
       });
     } catch (firstError) {
       let objectUrl;
@@ -121,15 +167,15 @@ function App() {
         instance.Core.documentViewer.closeDocument();
         objectUrl = URL.createObjectURL(file);
         await instance.UI.loadDocument(objectUrl, {
-          filename: docId,
-          extension: 'pdf',
+          filename: `${docId}.${resolvedExtension}`,
+          extension: resolvedExtension,
         });
       } catch (secondError) {
-        console.error('Local PDF load failed:', {
+        console.error('Local file load failed:', {
           firstError,
           secondError,
         });
-        alert('PDF load nahi ho saki. Console me error details check karein.');
+        alert('File load nahi ho saki. Console me error details check karein.');
       } finally {
         if (objectUrl) {
           setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
@@ -158,20 +204,20 @@ function App() {
     });
     const filename = doc.getFilename() || 'document';
     const storageKey = `${STORAGE_KEY_PREFIX}${filename}`;
-    localStorage.setItem(storageKey, xfdfString);
-    alert('Comments saved locally!');
+    const saved = safeSetLocalStorage(storageKey, xfdfString);
+    alert(saved ? 'Comments saved locally!' : 'Storage full. Old local comments were cleared.');
   };
 
   return (
     <div className="app-container">
       <header className="app-header">
-        <h1>PDF Viewer - Apryse WebViewer</h1>
+        <h1>Document Viewer - Apryse WebViewer</h1>
         <div className="header-actions">
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,application/pdf"
-            onChange={loadLocalPdf}
+            accept=".pdf,.docx,.xlsx,.xls,.pptx,.ppt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint"
+            onChange={loadLocalDocument}
             style={{ display: 'none' }}
           />
           <button
@@ -180,7 +226,7 @@ function App() {
             onClick={triggerFileSelect}
             disabled={isDocumentLoading}
           >
-            {isDocumentLoading ? 'Loading PDF...' : 'Open Local PDF'}
+            {isDocumentLoading ? 'Loading File...' : 'Open Local File'}
           </button>
           <button
             type="button"
