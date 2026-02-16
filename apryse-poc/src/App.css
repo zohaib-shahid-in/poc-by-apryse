@@ -70,3 +70,167 @@
   flex: 1;
   min-height: 0;
 }
+
+/* Mode tabs */
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+  margin-right: 12px;
+}
+.mode-tab {
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: transparent;
+  color: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.mode-tab:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.mode-tab.active {
+  background: #4f46e5;
+  border-color: #4f46e5;
+}
+
+/* Compare mode */
+.compare-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.compare-file {
+  display: flex;
+  align-items: center;
+}
+.compare-file-btn {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compare-file-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.compare-vs {
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+.compare-docs-btn,
+.compare-annots-btn,
+.exit-compare-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.compare-docs-btn {
+  background: #7c3aed;
+  color: white;
+}
+.compare-docs-btn:hover:not(:disabled) {
+  background: #6d28d9;
+}
+.compare-annots-btn {
+  background: #0891b2;
+  color: white;
+}
+.compare-annots-btn:hover:not(:disabled) {
+  background: #0e7490;
+}
+.exit-compare-btn {
+  background: #64748b;
+  color: white;
+}
+.exit-compare-btn:hover {
+  background: #475569;
+}
+.compare-docs-btn:disabled,
+.compare-annots-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Annotation diff panel */
+.annotation-diff-panel {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  width: 420px;
+  max-height: 70vh;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.annotation-diff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #1e293b;
+  color: white;
+}
+.annotation-diff-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.close-panel-btn {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.annotation-diff-content {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+.diff-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.9rem;
+}
+.diff-lists {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.diff-list h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
+  color: #334155;
+}
+.diff-list ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 0.85rem;
+  color: #475569;
+}
+.diff-list li {
+  margin-bottom: 4px;
+}
+.diff-list li.muted {
+  color: #94a3b8;
+  list-style: none;
+  padding-left: 0;
+}

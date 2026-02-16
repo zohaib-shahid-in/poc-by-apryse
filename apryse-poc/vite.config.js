@@ -14,7 +14,7 @@ export default defineConfig({
       targets: [
         {
           src: 'node_modules/@pdftron/webviewer/public/**/*',
-          dest: 'webviewer-lib',
+          dest: 'lib/webviewer',
         },
       ],
     }),
