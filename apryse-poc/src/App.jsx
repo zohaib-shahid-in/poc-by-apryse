@@ -94,6 +94,7 @@ function App() {
   const compareFileARef = useRef(null);
   const compareFileBRef = useRef(null);
   const activeViewObjectUrlRef = useRef(null);
+  const compareObjectUrlsRef = useRef([]);
   const [mode, setMode] = useState('view');
   const [isViewerReady, setIsViewerReady] = useState(false);
   const [isDocumentLoading, setIsDocumentLoading] = useState(false);
@@ -106,36 +107,45 @@ function App() {
   const [showAnnotationPanel, setShowAnnotationPanel] = useState(false);
 
   useEffect(() => {
-    if (!viewer.current) return;
+    if (!viewer.current || instanceRef.current) return;
+    let isDisposed = false;
 
     WebViewer(
       {
         path: WEBVIEWER_PATH,
         licenseKey:
-          'demo:1771159100768:609e95810300000000716850aaa6765e61788301c95176a2e1ff98cbd6',
+          '1771159100768:609e95810300000000716850aaa6765e61788301c95176a2e1ff98cbd6',
         initialDoc: 'https://pdftron.s3.amazonaws.com/downloads/pl/demo-annotated.pdf',
         fullAPI: true,
         isReadOnly: false,
         enableFilePicker: true,
       },
       viewer.current
-    ).then(async (instance) => {
-      instanceRef.current = instance;
-      try {
-        await setupViewerUI(instance);
-        setIsViewerReady(true);
-      } catch (error) {
-        console.error('Viewer initialization failed:', error);
-      }
-    }).catch((error) => {
-      console.error('WebViewer bootstrap failed:', error);
-    });
+    )
+      .then(async (instance) => {
+        if (isDisposed) return;
+        instanceRef.current = instance;
+        try {
+          await setupViewerUI(instance);
+          if (!isDisposed) setIsViewerReady(true);
+        } catch (error) {
+          console.error('Viewer initialization failed:', error);
+        }
+      })
+      .catch((error) => {
+        console.error('WebViewer bootstrap failed:', error);
+      });
 
     return () => {
+      isDisposed = true;
       if (activeViewObjectUrlRef.current) {
         URL.revokeObjectURL(activeViewObjectUrlRef.current);
         activeViewObjectUrlRef.current = null;
       }
+      compareObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      compareObjectUrlsRef.current = [];
+      instanceRef.current?.Core?.documentViewer?.closeDocument?.();
+      instanceRef.current = null;
     };
   }, []);
 
@@ -158,7 +168,11 @@ function App() {
     const resolvedExtension = extension || MIME_TO_EXTENSION[fileType];
 
     const instance = instanceRef.current;
-    if (!instance) return;
+    if (!instance || !isViewerReady) {
+      console.warn('Viewer not ready yet, ignoring file selection.');
+      e.target.value = '';
+      return;
+    }
 
     if (mode === 'compare') {
       instance.UI.exitMultiViewerMode?.();
@@ -231,17 +245,21 @@ function App() {
       UI.enterMultiViewerMode();
 
       const waitForMultiViewer = () =>
-        new Promise((resolve) => {
-          if (Core.getDocumentViewers?.().length >= 2) {
-            resolve();
-            return;
-          }
-          const handler = () => {
-            UI.removeEventListener?.(UI.Events?.MULTI_VIEWER_READY, handler);
-            resolve();
+        new Promise((resolve, reject) => {
+          const startedAt = Date.now();
+          const timeoutMs = 8000;
+          const check = () => {
+            if ((Core.getDocumentViewers?.() || []).length >= 2) {
+              resolve();
+              return;
+            }
+            if (Date.now() - startedAt > timeoutMs) {
+              reject(new Error('Compare viewer initialization timeout.'));
+              return;
+            }
+            setTimeout(check, 150);
           };
-          UI.addEventListener?.(UI.Events?.MULTI_VIEWER_READY, handler);
-          setTimeout(resolve, 1500);
+          check();
         });
 
       await waitForMultiViewer();
@@ -275,13 +293,13 @@ function App() {
 
       const loadDoc = (dv, file, label) => {
         const url = URL.createObjectURL(file);
+        compareObjectUrlsRef.current.push(url);
         const extension = getResolvedExtension(file);
 
         return new Promise((resolve, reject) => {
           const cleanup = () => {
             dv.removeEventListener('documentLoaded', onLoaded);
             dv.removeEventListener('documentLoadFailed', onFailed);
-            URL.revokeObjectURL(url);
           };
 
           const onLoaded = () => {
@@ -324,16 +342,24 @@ function App() {
 
       setCompareStatus(`Loaded: A (${metaA.pages} pages), B (${metaB.pages} pages)`);
 
-      const semanticDiffAllowed = ['pdf', 'docx'];
+      const isPdfPair = metaA.extension === 'pdf' && metaB.extension === 'pdf';
+      const isExcelPair =
+        ['xlsx', 'xls'].includes(metaA.extension) &&
+        ['xlsx', 'xls'].includes(metaB.extension);
       const canRunSemanticDiff =
-        semanticDiffAllowed.includes(metaA.extension) &&
-        semanticDiffAllowed.includes(metaB.extension) &&
-        typeof docViewer1.startSemanticDiff === 'function';
+        isPdfPair && typeof docViewer1.startSemanticDiff === 'function';
 
       if (canRunSemanticDiff) {
         setCompareStatus('Running semantic comparison...');
-        await docViewer1.startSemanticDiff(docViewer2);
-        setCompareStatus('Compare completed successfully.');
+        try {
+          await docViewer1.startSemanticDiff(docViewer2);
+          setCompareStatus('PDF comparison completed successfully.');
+        } catch (semanticErr) {
+          console.warn('Semantic diff failed. Keeping side-by-side compare active.', semanticErr);
+          setCompareStatus('Files loaded side-by-side. Semantic diff failed in current build.');
+        }
+      } else if (isExcelPair) {
+        setCompareStatus('Excel files loaded side-by-side for comparison.');
       } else {
         setCompareStatus(
           `Documents loaded. Semantic diff skipped for ${metaA.extension || 'unknown'} vs ${metaB.extension || 'unknown'}.`
@@ -403,6 +429,8 @@ function App() {
     setAnnotationDiff(null);
     setShowAnnotationPanel(false);
     setCompareStatus('');
+    compareObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    compareObjectUrlsRef.current = [];
   };
 
   const triggerFileSelect = () => {
