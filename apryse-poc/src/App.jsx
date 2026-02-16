@@ -27,6 +27,13 @@ const getFileExtension = (filename = '') => {
   return parts.length > 1 ? parts.pop() : '';
 };
 
+const getResolvedExtension = (file) => {
+  const ext = getFileExtension(file?.name || '');
+  if (ext) return ext;
+  const mime = (file?.type || '').toLowerCase();
+  return MIME_TO_EXTENSION[mime] || '';
+};
+
 const triggerDownload = (blob, filename) => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -64,6 +71,22 @@ const compareAnnotations = (annotsA, annotsB) => {
   return { onlyInA, onlyInB, inBoth };
 };
 
+const setupViewerUI = async (instance) => {
+  const { UI } = instance;
+
+  // WebViewer versions expose readiness differently.
+  if (UI?.initializedPromise && typeof UI.initializedPromise.then === 'function') {
+    await UI.initializedPromise;
+  } else {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  UI?.openElements?.(['notesPanel']);
+  if (UI?.Feature?.MultiViewerMode) {
+    UI.enableFeatures?.([UI.Feature.MultiViewerMode]);
+  }
+};
+
 function App() {
   const viewer = useRef(null);
   const instanceRef = useRef(null);
@@ -78,6 +101,7 @@ function App() {
   const [compareFileA, setCompareFileA] = useState(null);
   const [compareFileB, setCompareFileB] = useState(null);
   const [isComparing, setIsComparing] = useState(false);
+  const [compareStatus, setCompareStatus] = useState('');
   const [annotationDiff, setAnnotationDiff] = useState(null);
   const [showAnnotationPanel, setShowAnnotationPanel] = useState(false);
 
@@ -95,14 +119,16 @@ function App() {
         enableFilePicker: true,
       },
       viewer.current
-    ).then((instance) => {
+    ).then(async (instance) => {
       instanceRef.current = instance;
-      setIsViewerReady(true);
-
-      instance.UI.ready(() => {
-        instance.UI.openElements(['notesPanel']);
-        instance.UI.enableFeatures([instance.UI.Feature.MultiViewerMode]);
-      });
+      try {
+        await setupViewerUI(instance);
+        setIsViewerReady(true);
+      } catch (error) {
+        console.error('Viewer initialization failed:', error);
+      }
+    }).catch((error) => {
+      console.error('WebViewer bootstrap failed:', error);
     });
 
     return () => {
@@ -176,6 +202,7 @@ function App() {
     }
     if (side === 'A') setCompareFileA(file);
     else setCompareFileB(file);
+    setCompareStatus('');
     setAnnotationDiff(null);
     setShowAnnotationPanel(false);
     e.target.value = '';
@@ -191,6 +218,7 @@ function App() {
     const { UI, Core } = instance;
 
     setIsComparing(true);
+    setCompareStatus('Preparing compare view...');
     setAnnotationDiff(null);
     setShowAnnotationPanel(false);
 
@@ -225,57 +253,96 @@ function App() {
       }
 
       const [docViewer1, docViewer2] = viewers;
-      const loadDoc = (dv, file) => {
-        const url = URL.createObjectURL(file);
-        return new Promise((resolve, reject) => {
-          const onLoaded = () => {
-            dv.removeEventListener('documentLoaded', onLoaded);
-            URL.revokeObjectURL(url);
-            resolve();
+      const waitForPages = (dv) =>
+        new Promise((resolve, reject) => {
+          const startedAt = Date.now();
+          const timeoutMs = 20000;
+          const check = () => {
+            const doc = dv.getDocument?.();
+            const pages = doc?.getPageCount?.() || 0;
+            if (pages > 0) {
+              resolve(pages);
+              return;
+            }
+            if (Date.now() - startedAt > timeoutMs) {
+              reject(new Error('Document loaded but readable pages are not ready.'));
+              return;
+            }
+            setTimeout(check, 150);
           };
+          check();
+        });
+
+      const loadDoc = (dv, file, label) => {
+        const url = URL.createObjectURL(file);
+        const extension = getResolvedExtension(file);
+
+        return new Promise((resolve, reject) => {
+          const cleanup = () => {
+            dv.removeEventListener('documentLoaded', onLoaded);
+            dv.removeEventListener('documentLoadFailed', onFailed);
+            URL.revokeObjectURL(url);
+          };
+
+          const onLoaded = () => {
+            waitForPages(dv)
+              .then((pages) => {
+                cleanup();
+                resolve({ pages, extension });
+              })
+              .catch((err) => {
+                cleanup();
+                reject(new Error(`${label}: ${err.message}`));
+              });
+          };
+
+          const onFailed = (err) => {
+            cleanup();
+            reject(err || new Error(`${label}: documentLoadFailed`));
+          };
+
           dv.addEventListener('documentLoaded', onLoaded);
+          dv.addEventListener('documentLoadFailed', onFailed);
+
           if (dv.loadDocument) {
-            dv.loadDocument(url, { filename: file.name }).catch(reject);
+            dv
+              .loadDocument(url, { filename: file.name, extension })
+              .catch((err) => onFailed(err));
           } else {
-            UI.loadDocument?.(url, { filename: file.name }).catch(reject);
-            resolve();
+            UI.loadDocument?.(url, { filename: file.name, extension }).catch((err) => onFailed(err));
           }
         });
       };
 
-      try {
-        if (docViewer1.loadDocument) {
-          await Promise.all([
-            loadDoc(docViewer1, compareFileA),
-            loadDoc(docViewer2, compareFileB),
-          ]);
-        } else {
-          UI.openElements?.('comparePanel');
-          await Promise.all([
-            instance.UI.loadDocument(compareFileA, { filename: compareFileA.name }),
-            instance.UI.loadDocument(compareFileB, { filename: compareFileB.name }),
-          ]);
-        }
-      } catch {
-        const urlA = URL.createObjectURL(compareFileA);
-        const urlB = URL.createObjectURL(compareFileB);
-        try {
-          if (docViewer1?.loadDocument) {
-            await docViewer1.loadDocument(urlA, { filename: compareFileA.name });
-            await docViewer2.loadDocument(urlB, { filename: compareFileB.name });
-          }
-        } finally {
-          URL.revokeObjectURL(urlA);
-          URL.revokeObjectURL(urlB);
-        }
-      }
+      UI.openElements?.('comparePanel');
+      setCompareStatus('Loading Document A and Document B...');
 
-      if (typeof docViewer1.startSemanticDiff === 'function') {
+      const [metaA, metaB] = await Promise.all([
+        loadDoc(docViewer1, compareFileA, 'Document A'),
+        loadDoc(docViewer2, compareFileB, 'Document B'),
+      ]);
+
+      setCompareStatus(`Loaded: A (${metaA.pages} pages), B (${metaB.pages} pages)`);
+
+      const semanticDiffAllowed = ['pdf', 'docx'];
+      const canRunSemanticDiff =
+        semanticDiffAllowed.includes(metaA.extension) &&
+        semanticDiffAllowed.includes(metaB.extension) &&
+        typeof docViewer1.startSemanticDiff === 'function';
+
+      if (canRunSemanticDiff) {
+        setCompareStatus('Running semantic comparison...');
         await docViewer1.startSemanticDiff(docViewer2);
+        setCompareStatus('Compare completed successfully.');
+      } else {
+        setCompareStatus(
+          `Documents loaded. Semantic diff skipped for ${metaA.extension || 'unknown'} vs ${metaB.extension || 'unknown'}.`
+        );
       }
       setMode('compare');
     } catch (err) {
       console.error('Compare failed:', err);
+      setCompareStatus('Compare failed.');
       alert('Comparison failed: ' + (err?.message || 'Unknown error'));
     } finally {
       setIsComparing(false);
@@ -335,6 +402,7 @@ function App() {
     setCompareFileB(null);
     setAnnotationDiff(null);
     setShowAnnotationPanel(false);
+    setCompareStatus('');
   };
 
   const triggerFileSelect = () => {
@@ -481,6 +549,7 @@ function App() {
               <button type="button" className="exit-compare-btn" onClick={exitCompareMode}>
                 Exit Compare
               </button>
+              {compareStatus && <span className="compare-status">{compareStatus}</span>}
             </>
           )}
         </div>
